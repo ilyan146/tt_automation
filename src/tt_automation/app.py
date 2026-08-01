@@ -21,7 +21,7 @@ from tt_automation.extraction.openai_extractor import (
     ExtractionError,
     extract_transfer_data,
 )
-from tt_automation.extraction.workbook_reader import WorkbookReadError
+from tt_automation.extraction.workbook_reader import WorkbookReadError, workbook_to_text
 from tt_automation.models import TransferData
 
 
@@ -79,7 +79,10 @@ def main() -> None:
         SourceDocument(upload.name, upload.getvalue()) for upload in uploaded_files
     ]
     _sync_source_state(documents)
-    _render_source_summary(documents)
+    summary_slot = st.empty()
+    if not _has_extracted_data():
+        with summary_slot.container():
+            _render_source_summary(documents)
 
     can_extract = bool(documents) and settings.openai_api_key is not None
     if st.button(
@@ -89,6 +92,8 @@ def main() -> None:
         disabled=not can_extract,
     ):
         _extract(documents, settings)
+        if _has_extracted_data():
+            summary_slot.empty()
 
     if settings.openai_api_key is None:
         st.warning("Add `OPENAI_API_KEY` to `.env` before extracting documents.")
@@ -101,8 +106,12 @@ def main() -> None:
     st.markdown(
         '<p class="step-label">02 &nbsp; REVIEW DETAILS</p>', unsafe_allow_html=True
     )
-    _render_review_notes(extracted_data)
-    _render_review_form(extracted_data)
+    source_column, review_column = st.columns([1.1, 2], gap="large")
+    with source_column:
+        _render_source_preview(documents)
+    with review_column:
+        _render_review_notes(extracted_data)
+        _render_review_form(extracted_data)
     _render_download()
 
 
@@ -129,6 +138,10 @@ def _render_system_status(settings: Settings) -> None:
     )
 
 
+def _has_extracted_data() -> bool:
+    return isinstance(st.session_state.get(DATA_KEY), TransferData)
+
+
 def _render_source_summary(documents: list[SourceDocument]) -> None:
     if not documents:
         return
@@ -145,7 +158,7 @@ def _render_source_summary(documents: list[SourceDocument]) -> None:
             preview_columns[index].image(
                 document.content,
                 caption=document.name,
-                width="stretch",
+                width=500,
             )
         if len(image_documents) > 3:
             st.caption(f"{len(image_documents) - 3} additional images selected")
@@ -160,9 +173,27 @@ def _render_source_summary(documents: list[SourceDocument]) -> None:
         )
 
 
+def _render_source_preview(documents: list[SourceDocument]) -> None:
+    st.markdown("#### Source documents")
+    if not documents:
+        st.caption("Re-upload the source files to compare them with the values below.")
+        return
+
+    with st.container(height=900, border=False):
+        for index, document in enumerate(documents):
+            with st.expander(document.name, expanded=index == 0):
+                if document.is_image:
+                    st.image(document.content, width="stretch")
+                    continue
+                try:
+                    st.code(workbook_to_text(document), language="text")
+                except WorkbookReadError as error:
+                    st.caption(str(error))
+
+
 def _extract(documents: list[SourceDocument], settings: Settings) -> None:
     try:
-        with st.spinner("Reading source documents..."):
+        with st.spinner("Extracting source documents...", show_time=True):
             extracted_data = extract_transfer_data(documents, settings)
     except (ExtractionError, InvalidDocumentError, WorkbookReadError) as error:
         st.error(str(error))
@@ -186,12 +217,11 @@ def _render_review_notes(data: TransferData) -> None:
 def _render_review_form(data: TransferData) -> None:
     revision = st.session_state.get(REVIEW_REVISION_KEY, 0)
 
-    # key = lambda field: f"review_{revision}_{field}"
     def key(field: str) -> str:
         return f"review_{revision}_{field}"
 
     with st.form("transfer_review"):
-        transfer_column, invoice_column = st.columns(2, gap="large")
+        transfer_column, invoice_column = st.columns(2, gap="medium")
         with transfer_column:
             st.markdown("#### Transfer")
             transfer_date = st.date_input(
@@ -411,7 +441,7 @@ def _apply_styles() -> None:
                 linear-gradient(90deg, rgba(23, 37, 42, 0.025) 1px, transparent 1px);
             background-size: 24px 24px;
         }
-        .block-container { max-width: 1120px; padding-top: 3rem; padding-bottom: 5rem; }
+        .block-container { max-width: 1600px; padding-top: 3rem; padding-bottom: 5rem; }
         h1, h2, h3, h4 { font-family: Georgia, "Times New Roman", serif; color: var(--ink); letter-spacing: 0; }
         h1 { font-size: 2.5rem; line-height: 1.05; margin-bottom: 0.4rem; }
         p, label, input, textarea, button { font-family: Aptos, "Segoe UI", sans-serif; letter-spacing: 0; }
