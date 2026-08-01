@@ -1,12 +1,11 @@
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
-from typing import Any
 
 from pydantic import ValidationError
 import streamlit as st
 
-from tt_automation.config import Settings, TEMPLATE_PATH
+from tt_automation.config import Settings
 from tt_automation.excel.generator import (
     EXCEL_MIME_TYPE,
     GeneratedWorkbook,
@@ -18,13 +17,17 @@ from tt_automation.extraction.documents import (
     SourceDocument,
     SUPPORTED_UPLOAD_TYPES,
 )
-from tt_automation.extraction.openai_extractor import ExtractionError, extract_transfer_data
-from tt_automation.extraction.workbook_reader import WorkbookReadError
-from tt_automation.models import TransferData
+from tt_automation.extraction.openai_extractor import (
+    ExtractionError,
+    extract_transfer_data,
+)
+from tt_automation.extraction.workbook_reader import WorkbookReadError, workbook_to_text
+from tt_automation.models import ApplicantDetails, TransferData
 
 
 DATA_KEY = "extracted_transfer_data"
 OUTPUT_KEY = "generated_workbook"
+APPLICANT_KEY = "applicant_details"
 SOURCE_SIGNATURE_KEY = "source_signature"
 REVIEW_REVISION_KEY = "review_revision"
 
@@ -54,14 +57,18 @@ def main() -> None:
     _apply_styles()
     settings = Settings()
 
-    st.markdown('<p class="eyebrow">INTERNATIONAL REMITTANCE</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<p class="eyebrow">INTERNATIONAL REMITTANCE</p>', unsafe_allow_html=True
+    )
     st.title("TT Workbook")
     st.caption("Prepare the fixed telegraphic-transfer workbook from source documents.")
 
     _render_system_status(settings)
     st.divider()
 
-    st.markdown('<p class="step-label">01 &nbsp; SOURCE DOCUMENTS</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<p class="step-label">01 &nbsp; SOURCE DOCUMENTS</p>', unsafe_allow_html=True
+    )
     uploaded_files = st.file_uploader(
         "Invoice images or Excel files",
         type=SUPPORTED_UPLOAD_TYPES,
@@ -73,7 +80,10 @@ def main() -> None:
         SourceDocument(upload.name, upload.getvalue()) for upload in uploaded_files
     ]
     _sync_source_state(documents)
-    _render_source_summary(documents)
+    summary_slot = st.empty()
+    if not _has_extracted_data():
+        with summary_slot.container():
+            _render_source_summary(documents)
 
     can_extract = bool(documents) and settings.openai_api_key is not None
     if st.button(
@@ -83,6 +93,8 @@ def main() -> None:
         disabled=not can_extract,
     ):
         _extract(documents, settings)
+        if _has_extracted_data():
+            summary_slot.empty()
 
     if settings.openai_api_key is None:
         st.warning("Add `OPENAI_API_KEY` to `.env` before extracting documents.")
@@ -92,9 +104,15 @@ def main() -> None:
         return
 
     st.divider()
-    st.markdown('<p class="step-label">02 &nbsp; REVIEW DETAILS</p>', unsafe_allow_html=True)
-    _render_review_notes(extracted_data)
-    _render_review_form(extracted_data)
+    st.markdown(
+        '<p class="step-label">02 &nbsp; REVIEW DETAILS</p>', unsafe_allow_html=True
+    )
+    source_column, review_column = st.columns([1.1, 2], gap="large")
+    with source_column:
+        _render_source_preview(documents)
+    with review_column:
+        _render_review_notes(extracted_data)
+        _render_review_form(extracted_data)
     _render_download()
 
 
@@ -105,7 +123,9 @@ def _render_system_status(settings: Settings) -> None:
         '<span class="status-copy">Fixed TT workbook</span>',
         unsafe_allow_html=True,
     )
-    api_status = "Configured" if settings.openai_api_key is not None else "Missing .env key"
+    api_status = (
+        "Configured" if settings.openai_api_key is not None else "Missing .env key"
+    )
     api_class = "status-ready" if settings.openai_api_key is not None else "status-warn"
     second.markdown(
         f'<span class="status-dot {api_class}"></span><strong>OpenAI</strong><br>'
@@ -117,6 +137,10 @@ def _render_system_status(settings: Settings) -> None:
         f'<span class="status-copy">{settings.openai_model}</span>',
         unsafe_allow_html=True,
     )
+
+
+def _has_extracted_data() -> bool:
+    return isinstance(st.session_state.get(DATA_KEY), TransferData)
 
 
 def _render_source_summary(documents: list[SourceDocument]) -> None:
@@ -135,7 +159,7 @@ def _render_source_summary(documents: list[SourceDocument]) -> None:
             preview_columns[index].image(
                 document.content,
                 caption=document.name,
-                width="stretch",
+                width=500,
             )
         if len(image_documents) > 3:
             st.caption(f"{len(image_documents) - 3} additional images selected")
@@ -144,15 +168,33 @@ def _render_source_summary(documents: list[SourceDocument]) -> None:
         size = _format_file_size(len(document.content))
         st.markdown(
             f'<div class="file-row"><span class="file-icon">XLS</span>'
-            f'<span><strong>{_escape_html(document.name)}</strong><br>'
-            f'<small>{size}</small></span></div>',
+            f"<span><strong>{_escape_html(document.name)}</strong><br>"
+            f"<small>{size}</small></span></div>",
             unsafe_allow_html=True,
         )
 
 
+def _render_source_preview(documents: list[SourceDocument]) -> None:
+    st.markdown("#### Source documents")
+    if not documents:
+        st.caption("Re-upload the source files to compare them with the values below.")
+        return
+
+    with st.container(height=900, border=False):
+        for index, document in enumerate(documents):
+            with st.expander(document.name, expanded=index == 0):
+                if document.is_image:
+                    st.image(document.content, width="stretch")
+                    continue
+                try:
+                    st.code(workbook_to_text(document), language="text")
+                except WorkbookReadError as error:
+                    st.caption(str(error))
+
+
 def _extract(documents: list[SourceDocument], settings: Settings) -> None:
     try:
-        with st.spinner("Reading source documents..."):
+        with st.spinner("Extracting source documents...", show_time=True):
             extracted_data = extract_transfer_data(documents, settings)
     except (ExtractionError, InvalidDocumentError, WorkbookReadError) as error:
         st.error(str(error))
@@ -175,10 +217,18 @@ def _render_review_notes(data: TransferData) -> None:
 
 def _render_review_form(data: TransferData) -> None:
     revision = st.session_state.get(REVIEW_REVISION_KEY, 0)
-    key = lambda field: f"review_{revision}_{field}"
+    stored_applicant = st.session_state.get(APPLICANT_KEY)
+    applicant = (
+        stored_applicant
+        if isinstance(stored_applicant, ApplicantDetails)
+        else ApplicantDetails()
+    )
+
+    def key(field: str) -> str:
+        return f"review_{revision}_{field}"
 
     with st.form("transfer_review"):
-        transfer_column, invoice_column = st.columns(2, gap="large")
+        transfer_column, invoice_column = st.columns(2, gap="medium")
         with transfer_column:
             st.markdown("#### Transfer")
             transfer_date = st.date_input(
@@ -255,6 +305,87 @@ def _render_review_form(data: TransferData) -> None:
                 key=key("invoice_date"),
             )
 
+        with st.expander("Applicant and originator", expanded=False):
+            st.caption(
+                "Standing template values. Edit them before generating the workbook."
+            )
+            applicant_column, originator_column = st.columns(2, gap="medium")
+            with applicant_column:
+                applicant_name = st.text_input(
+                    "Applicant's name",
+                    value=applicant.applicant_name,
+                    key=key("applicant_name"),
+                )
+                applicant_id_number = st.text_input(
+                    "NRIC / passport no.",
+                    value=applicant.applicant_id_number,
+                    key=key("applicant_id_number"),
+                )
+                nationality_column, application_column = st.columns(2)
+                nationality = nationality_column.text_input(
+                    "Nationality",
+                    value=applicant.nationality,
+                    key=key("nationality"),
+                )
+                application_number = application_column.text_input(
+                    "Application no.",
+                    value=applicant.application_number,
+                    key=key("application_number"),
+                )
+                contact_numbers = st.text_input(
+                    "Tel. no. and fax no.",
+                    value=applicant.contact_numbers,
+                    key=key("contact_numbers"),
+                )
+                company_name = st.text_input(
+                    "Company name",
+                    value=applicant.company_name,
+                    key=key("company_name"),
+                )
+                company_registration_number = st.text_input(
+                    "Co. reg. no.",
+                    value=applicant.company_registration_number,
+                    key=key("company_registration_number"),
+                )
+                company_address = st.text_area(
+                    "Company address",
+                    value=applicant.company_address,
+                    key=key("company_address"),
+                )
+
+            with originator_column:
+                originator_name = st.text_input(
+                    "Originator name",
+                    value=applicant.originator_name,
+                    key=key("originator_name"),
+                )
+                originator_id_number = st.text_input(
+                    "Originator P.P no. / IC / ROC no.",
+                    value=applicant.originator_id_number,
+                    key=key("originator_id_number"),
+                )
+                originator_nationality_column, birth_date_column = st.columns(2)
+                originator_nationality = originator_nationality_column.text_input(
+                    "Originator nationality",
+                    value=applicant.originator_nationality,
+                    key=key("originator_nationality"),
+                )
+                originator_date_of_birth = birth_date_column.text_input(
+                    "Date of birth",
+                    value=applicant.originator_date_of_birth,
+                    key=key("originator_date_of_birth"),
+                )
+                originator_place_of_birth = st.text_input(
+                    "Place of birth",
+                    value=applicant.originator_place_of_birth,
+                    key=key("originator_place_of_birth"),
+                )
+                originator_address = st.text_area(
+                    "Originator address",
+                    value=applicant.originator_address,
+                    key=key("originator_address"),
+                )
+
         submitted = st.form_submit_button(
             "Generate workbook",
             type="primary",
@@ -281,9 +412,27 @@ def _render_review_form(data: TransferData) -> None:
             invoice_date=invoice_date,
             review_notes=data.review_notes,
         )
+        reviewed_applicant = ApplicantDetails(
+            application_number=application_number,
+            applicant_name=applicant_name,
+            applicant_id_number=applicant_id_number,
+            nationality=nationality,
+            contact_numbers=contact_numbers,
+            company_name=company_name,
+            company_registration_number=company_registration_number,
+            company_address=company_address,
+            originator_name=originator_name,
+            originator_nationality=originator_nationality,
+            originator_id_number=originator_id_number,
+            originator_date_of_birth=originator_date_of_birth,
+            originator_place_of_birth=originator_place_of_birth,
+            originator_address=originator_address,
+        )
     except (ValidationError, InvalidOperation, ValueError) as error:
         st.error(f"Check the reviewed values: {error}")
         return
+
+    st.session_state[APPLICANT_KEY] = reviewed_applicant
 
     if missing_fields := _missing_required_fields(reviewed_data):
         st.error(f"Complete these fields: {', '.join(missing_fields)}.")
@@ -291,7 +440,7 @@ def _render_review_form(data: TransferData) -> None:
 
     try:
         with st.spinner("Creating the Excel workbook..."):
-            generated = generate_workbook(reviewed_data)
+            generated = generate_workbook(reviewed_data, applicant=reviewed_applicant)
     except TemplateWriteError as error:
         st.error(str(error))
         return
@@ -398,7 +547,7 @@ def _apply_styles() -> None:
                 linear-gradient(90deg, rgba(23, 37, 42, 0.025) 1px, transparent 1px);
             background-size: 24px 24px;
         }
-        .block-container { max-width: 1120px; padding-top: 3rem; padding-bottom: 5rem; }
+        .block-container { max-width: 1600px; padding-top: 3rem; padding-bottom: 5rem; }
         h1, h2, h3, h4 { font-family: Georgia, "Times New Roman", serif; color: var(--ink); letter-spacing: 0; }
         h1 { font-size: 2.5rem; line-height: 1.05; margin-bottom: 0.4rem; }
         p, label, input, textarea, button { font-family: Aptos, "Segoe UI", sans-serif; letter-spacing: 0; }

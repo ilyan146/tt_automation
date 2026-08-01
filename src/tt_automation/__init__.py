@@ -1,2 +1,1 @@
 """Telegraphic-transfer workbook automation."""
-

@@ -35,7 +35,9 @@ def workbook_to_text(document: SourceDocument) -> str:
         raise WorkbookReadError(f"Could not read workbook: {document.name}") from error
 
     if not text.strip():
-        raise WorkbookReadError(f"Workbook contains no readable values: {document.name}")
+        raise WorkbookReadError(
+            f"Workbook contains no readable values: {document.name}"
+        )
     if len(text) > MAX_WORKBOOK_CHARACTERS:
         return f"{text[:MAX_WORKBOOK_CHARACTERS]}\n[Workbook content truncated]"
     return text
@@ -96,6 +98,11 @@ def _read_legacy_workbook(content: bytes) -> str:
 
 
 def _legacy_cell_value(workbook: xlrd.book.Book, cell: xlrd.sheet.Cell) -> Any:
+    """Normalize cell values from the legacy xlrd library to match openpyxl output.
+    :params workbook: The xlrd workbook object, needed for date conversion.
+    :params cell: The xlrd cell object to normalize.
+    :returns: The normalized cell value, which may be a string, number, boolean, or datetime.
+    """
     if cell.ctype == xlrd.XL_CELL_DATE:
         return xlrd.xldate_as_datetime(cell.value, workbook.datemode)
     if cell.ctype == xlrd.XL_CELL_BOOLEAN:

@@ -95,3 +95,27 @@ class TransferData(BaseModel):
     @classmethod
     def uppercase_codes(cls, value: str | None) -> str | None:
         return value.upper() if value else value
+
+
+class ApplicantDetails(BaseModel):
+    """Standing applicant and originator values pre-filled in the TT form."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    application_number: str = "1"
+    applicant_name: str = "Sharifa Jahan Binti Habibullah Khan"
+    applicant_id_number: str = "791027-07-5568"
+    nationality: str = "Malaysian"
+    contact_numbers: str = "193708001"
+    company_name: str = "Extra Cash SDN BHD"
+    company_registration_number: str = "690908-V"
+    company_address: str = (
+        "Lot 1, Langkawi Fair Shopping Mall, Jalan Persiaran Putra, "
+        "07000 Kuah, Langkawi, Kedah"
+    )
+    originator_name: str = "SSM"
+    originator_nationality: str = ""
+    originator_id_number: str = ""
+    originator_date_of_birth: str = ""
+    originator_place_of_birth: str = ""
+    originator_address: str = "SSM"
