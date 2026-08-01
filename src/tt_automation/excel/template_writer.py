@@ -95,6 +95,10 @@ def _write_cells(workbook_path: Path, values: dict[str, CellValue]) -> None:
         )
         worksheet = workbook.sheets[TEMPLATE_SHEET]
 
+        for sheet in list(workbook.sheets):
+            if sheet.name != TEMPLATE_SHEET:
+                sheet.delete()
+
         for address, value in values.items():
             cell = worksheet.range(address)
             cell.value = value
