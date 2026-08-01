@@ -1,0 +1,28 @@
+[project]
+name = "tt-automation"
+version = "0.1.0"
+description = "Extract transfer details from images and workbooks into a fixed Excel template"
+readme = "README.md"
+authors = [
+    { name = "Nazer, Mohamed Ilyan", email = "mohamed.ilyan+Boskalis@boskalis.com" }
+]
+requires-python = ">=3.13.12"
+dependencies = [
+    "openai>=1.99.0",
+    "openpyxl>=3.1.5",
+    "pydantic>=2.11.7",
+    "pydantic-settings>=2.10.1",
+    "python-dotenv>=1.1.1",
+    "streamlit>=1.47.1",
+    "xlwings>=0.33.15; sys_platform == 'win32'",
+    "xlrd>=2.0.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.3,<0.12.0"]
+build-backend = "uv_build"
