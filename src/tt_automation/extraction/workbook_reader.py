@@ -35,7 +35,9 @@ def workbook_to_text(document: SourceDocument) -> str:
         raise WorkbookReadError(f"Could not read workbook: {document.name}") from error
 
     if not text.strip():
-        raise WorkbookReadError(f"Workbook contains no readable values: {document.name}")
+        raise WorkbookReadError(
+            f"Workbook contains no readable values: {document.name}"
+        )
     if len(text) > MAX_WORKBOOK_CHARACTERS:
         return f"{text[:MAX_WORKBOOK_CHARACTERS]}\n[Workbook content truncated]"
     return text

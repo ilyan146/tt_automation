@@ -10,7 +10,10 @@ import pytest
 
 from tt_automation.config import Settings
 from tt_automation.extraction.documents import SourceDocument
-from tt_automation.extraction.openai_extractor import ExtractionError, extract_transfer_data
+from tt_automation.extraction.openai_extractor import (
+    ExtractionError,
+    extract_transfer_data,
+)
 from tt_automation.models import TransferData
 
 

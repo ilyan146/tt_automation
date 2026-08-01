@@ -1,12 +1,11 @@
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
-from typing import Any
 
 from pydantic import ValidationError
 import streamlit as st
 
-from tt_automation.config import Settings, TEMPLATE_PATH
+from tt_automation.config import Settings
 from tt_automation.excel.generator import (
     EXCEL_MIME_TYPE,
     GeneratedWorkbook,
@@ -18,7 +17,10 @@ from tt_automation.extraction.documents import (
     SourceDocument,
     SUPPORTED_UPLOAD_TYPES,
 )
-from tt_automation.extraction.openai_extractor import ExtractionError, extract_transfer_data
+from tt_automation.extraction.openai_extractor import (
+    ExtractionError,
+    extract_transfer_data,
+)
 from tt_automation.extraction.workbook_reader import WorkbookReadError
 from tt_automation.models import TransferData
 
@@ -54,14 +56,18 @@ def main() -> None:
     _apply_styles()
     settings = Settings()
 
-    st.markdown('<p class="eyebrow">INTERNATIONAL REMITTANCE</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<p class="eyebrow">INTERNATIONAL REMITTANCE</p>', unsafe_allow_html=True
+    )
     st.title("TT Workbook")
     st.caption("Prepare the fixed telegraphic-transfer workbook from source documents.")
 
     _render_system_status(settings)
     st.divider()
 
-    st.markdown('<p class="step-label">01 &nbsp; SOURCE DOCUMENTS</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<p class="step-label">01 &nbsp; SOURCE DOCUMENTS</p>', unsafe_allow_html=True
+    )
     uploaded_files = st.file_uploader(
         "Invoice images or Excel files",
         type=SUPPORTED_UPLOAD_TYPES,
@@ -92,7 +98,9 @@ def main() -> None:
         return
 
     st.divider()
-    st.markdown('<p class="step-label">02 &nbsp; REVIEW DETAILS</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<p class="step-label">02 &nbsp; REVIEW DETAILS</p>', unsafe_allow_html=True
+    )
     _render_review_notes(extracted_data)
     _render_review_form(extracted_data)
     _render_download()
@@ -105,7 +113,9 @@ def _render_system_status(settings: Settings) -> None:
         '<span class="status-copy">Fixed TT workbook</span>',
         unsafe_allow_html=True,
     )
-    api_status = "Configured" if settings.openai_api_key is not None else "Missing .env key"
+    api_status = (
+        "Configured" if settings.openai_api_key is not None else "Missing .env key"
+    )
     api_class = "status-ready" if settings.openai_api_key is not None else "status-warn"
     second.markdown(
         f'<span class="status-dot {api_class}"></span><strong>OpenAI</strong><br>'
@@ -144,8 +154,8 @@ def _render_source_summary(documents: list[SourceDocument]) -> None:
         size = _format_file_size(len(document.content))
         st.markdown(
             f'<div class="file-row"><span class="file-icon">XLS</span>'
-            f'<span><strong>{_escape_html(document.name)}</strong><br>'
-            f'<small>{size}</small></span></div>',
+            f"<span><strong>{_escape_html(document.name)}</strong><br>"
+            f"<small>{size}</small></span></div>",
             unsafe_allow_html=True,
         )
 
@@ -175,7 +185,10 @@ def _render_review_notes(data: TransferData) -> None:
 
 def _render_review_form(data: TransferData) -> None:
     revision = st.session_state.get(REVIEW_REVISION_KEY, 0)
-    key = lambda field: f"review_{revision}_{field}"
+
+    # key = lambda field: f"review_{revision}_{field}"
+    def key(field: str) -> str:
+        return f"review_{revision}_{field}"
 
     with st.form("transfer_review"):
         transfer_column, invoice_column = st.columns(2, gap="large")

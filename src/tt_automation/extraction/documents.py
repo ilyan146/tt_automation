@@ -42,7 +42,9 @@ class SourceDocument:
         try:
             return IMAGE_MEDIA_TYPES[self.suffix]
         except KeyError as error:
-            raise InvalidDocumentError(f"{self.name} is not a supported image.") from error
+            raise InvalidDocumentError(
+                f"{self.name} is not a supported image."
+            ) from error
 
     def validate(self) -> None:
         if self.suffix not in SUPPORTED_SUFFIXES:

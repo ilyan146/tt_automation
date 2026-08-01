@@ -11,6 +11,4 @@ def test_output_filename_is_stable_and_windows_safe() -> None:
         invoice_date=date(2026, 7, 3),
     )
 
-    assert output_filename(data) == (
-        "INV_42_2026_Example_Sons_Co_Ltd_2026-07-03.xls"
-    )
+    assert output_filename(data) == ("INV_42_2026_Example_Sons_Co_Ltd_2026-07-03.xls")

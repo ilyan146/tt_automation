@@ -52,14 +52,16 @@ def extract_transfer_data(
             reasoning={"effort": settings.openai_reasoning_effort},
             instructions=SYSTEM_INSTRUCTIONS,
             input=build_response_input(documents),
-            text_format=TransferData, # producing structured output 
+            text_format=TransferData,  # producing structured output
         )
     except ValidationError as error:
         raise ExtractionError(
             "OpenAI returned one or more values in an unsupported format."
         ) from error
     except OpenAIError as error:
-        raise ExtractionError(f"OpenAI could not extract the documents: {error}") from error
+        raise ExtractionError(
+            f"OpenAI could not extract the documents: {error}"
+        ) from error
 
     if response.output_parsed is None:
         raise ExtractionError("OpenAI returned no structured transfer data.")
