@@ -1,0 +1,11 @@
+[theme]
+base = "light"
+primaryColor = "#087f73"
+backgroundColor = "#f4f6f3"
+secondaryBackgroundColor = "#ffffff"
+textColor = "#17252a"
+linkColor = "#087f73"
+borderColor = "#cfd8d3"
+font = "Aptos, 'Segoe UI', sans-serif"
+headingFont = "Georgia, 'Times New Roman', serif"
+baseRadius = "small"

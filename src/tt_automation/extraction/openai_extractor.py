@@ -52,7 +52,7 @@ def extract_transfer_data(
             reasoning={"effort": settings.openai_reasoning_effort},
             instructions=SYSTEM_INSTRUCTIONS,
             input=build_response_input(documents),
-            text_format=TransferData,
+            text_format=TransferData, # producing structured output 
         )
     except ValidationError as error:
         raise ExtractionError(
