@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 
 from tt_automation.config import TEMPLATE_PATH
 from tt_automation.excel.template_writer import fill_template
-from tt_automation.models import TransferData
+from tt_automation.models import ApplicantDetails, TransferData
 
 
 EXCEL_MIME_TYPE = "application/vnd.ms-excel"
@@ -21,13 +21,15 @@ class GeneratedWorkbook:
 def generate_workbook(
     data: TransferData,
     template_path: Path = TEMPLATE_PATH,
+    *,
+    applicant: ApplicantDetails | None = None,
 ) -> GeneratedWorkbook:
     """Populate the fixed template and return a download-ready workbook."""
 
     name = output_filename(data)
     with TemporaryDirectory(prefix="tt-automation-") as temporary_directory:
         output_path = Path(temporary_directory) / name
-        fill_template(template_path, output_path, data)
+        fill_template(template_path, output_path, data, applicant)
         content = output_path.read_bytes()
     return GeneratedWorkbook(name=name, content=content)
 

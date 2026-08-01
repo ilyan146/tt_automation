@@ -22,11 +22,12 @@ from tt_automation.extraction.openai_extractor import (
     extract_transfer_data,
 )
 from tt_automation.extraction.workbook_reader import WorkbookReadError, workbook_to_text
-from tt_automation.models import TransferData
+from tt_automation.models import ApplicantDetails, TransferData
 
 
 DATA_KEY = "extracted_transfer_data"
 OUTPUT_KEY = "generated_workbook"
+APPLICANT_KEY = "applicant_details"
 SOURCE_SIGNATURE_KEY = "source_signature"
 REVIEW_REVISION_KEY = "review_revision"
 
@@ -216,6 +217,12 @@ def _render_review_notes(data: TransferData) -> None:
 
 def _render_review_form(data: TransferData) -> None:
     revision = st.session_state.get(REVIEW_REVISION_KEY, 0)
+    stored_applicant = st.session_state.get(APPLICANT_KEY)
+    applicant = (
+        stored_applicant
+        if isinstance(stored_applicant, ApplicantDetails)
+        else ApplicantDetails()
+    )
 
     def key(field: str) -> str:
         return f"review_{revision}_{field}"
@@ -298,6 +305,87 @@ def _render_review_form(data: TransferData) -> None:
                 key=key("invoice_date"),
             )
 
+        with st.expander("Applicant and originator", expanded=False):
+            st.caption(
+                "Standing template values. Edit them before generating the workbook."
+            )
+            applicant_column, originator_column = st.columns(2, gap="medium")
+            with applicant_column:
+                applicant_name = st.text_input(
+                    "Applicant's name",
+                    value=applicant.applicant_name,
+                    key=key("applicant_name"),
+                )
+                applicant_id_number = st.text_input(
+                    "NRIC / passport no.",
+                    value=applicant.applicant_id_number,
+                    key=key("applicant_id_number"),
+                )
+                nationality_column, application_column = st.columns(2)
+                nationality = nationality_column.text_input(
+                    "Nationality",
+                    value=applicant.nationality,
+                    key=key("nationality"),
+                )
+                application_number = application_column.text_input(
+                    "Application no.",
+                    value=applicant.application_number,
+                    key=key("application_number"),
+                )
+                contact_numbers = st.text_input(
+                    "Tel. no. and fax no.",
+                    value=applicant.contact_numbers,
+                    key=key("contact_numbers"),
+                )
+                company_name = st.text_input(
+                    "Company name",
+                    value=applicant.company_name,
+                    key=key("company_name"),
+                )
+                company_registration_number = st.text_input(
+                    "Co. reg. no.",
+                    value=applicant.company_registration_number,
+                    key=key("company_registration_number"),
+                )
+                company_address = st.text_area(
+                    "Company address",
+                    value=applicant.company_address,
+                    key=key("company_address"),
+                )
+
+            with originator_column:
+                originator_name = st.text_input(
+                    "Originator name",
+                    value=applicant.originator_name,
+                    key=key("originator_name"),
+                )
+                originator_id_number = st.text_input(
+                    "Originator P.P no. / IC / ROC no.",
+                    value=applicant.originator_id_number,
+                    key=key("originator_id_number"),
+                )
+                originator_nationality_column, birth_date_column = st.columns(2)
+                originator_nationality = originator_nationality_column.text_input(
+                    "Originator nationality",
+                    value=applicant.originator_nationality,
+                    key=key("originator_nationality"),
+                )
+                originator_date_of_birth = birth_date_column.text_input(
+                    "Date of birth",
+                    value=applicant.originator_date_of_birth,
+                    key=key("originator_date_of_birth"),
+                )
+                originator_place_of_birth = st.text_input(
+                    "Place of birth",
+                    value=applicant.originator_place_of_birth,
+                    key=key("originator_place_of_birth"),
+                )
+                originator_address = st.text_area(
+                    "Originator address",
+                    value=applicant.originator_address,
+                    key=key("originator_address"),
+                )
+
         submitted = st.form_submit_button(
             "Generate workbook",
             type="primary",
@@ -324,9 +412,27 @@ def _render_review_form(data: TransferData) -> None:
             invoice_date=invoice_date,
             review_notes=data.review_notes,
         )
+        reviewed_applicant = ApplicantDetails(
+            application_number=application_number,
+            applicant_name=applicant_name,
+            applicant_id_number=applicant_id_number,
+            nationality=nationality,
+            contact_numbers=contact_numbers,
+            company_name=company_name,
+            company_registration_number=company_registration_number,
+            company_address=company_address,
+            originator_name=originator_name,
+            originator_nationality=originator_nationality,
+            originator_id_number=originator_id_number,
+            originator_date_of_birth=originator_date_of_birth,
+            originator_place_of_birth=originator_place_of_birth,
+            originator_address=originator_address,
+        )
     except (ValidationError, InvalidOperation, ValueError) as error:
         st.error(f"Check the reviewed values: {error}")
         return
+
+    st.session_state[APPLICANT_KEY] = reviewed_applicant
 
     if missing_fields := _missing_required_fields(reviewed_data):
         st.error(f"Complete these fields: {', '.join(missing_fields)}.")
@@ -334,7 +440,7 @@ def _render_review_form(data: TransferData) -> None:
 
     try:
         with st.spinner("Creating the Excel workbook..."):
-            generated = generate_workbook(reviewed_data)
+            generated = generate_workbook(reviewed_data, applicant=reviewed_applicant)
     except TemplateWriteError as error:
         st.error(str(error))
         return
