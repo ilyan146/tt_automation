@@ -1,17 +1,20 @@
 from base64 import b64encode
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 
 from openai import OpenAI, OpenAIError
 from openai.types.responses import ResponseInputContentParam, ResponseInputParam
 from pydantic import ValidationError
 
 from tt_automation.config import Settings
-from tt_automation.extraction.documents import SourceDocument
-from tt_automation.extraction.workbook_reader import workbook_to_text
+from tt_automation.extraction.documents import InvalidDocumentError, SourceDocument
+from tt_automation.extraction.workbook_reader import WorkbookReadError, workbook_to_text
 from tt_automation.models import TransferData
 
 
 MAX_DOCUMENTS = 10
+MAX_PARALLEL_EXTRACTIONS = 4
 
 SYSTEM_INSTRUCTIONS = """
 Extract the values needed for a telegraphic-transfer application from the supplied
@@ -32,6 +35,58 @@ replace applicant identity fields because those are fixed in the template.
 
 class ExtractionError(RuntimeError):
     """Raised when source documents cannot be interpreted by OpenAI."""
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentExtraction:
+    """Outcome of extracting a single source document."""
+
+    document: SourceDocument
+    data: TransferData | None = None
+    error: str | None = None
+
+
+def extract_each_document(
+    documents: Sequence[SourceDocument],
+    settings: Settings,
+    *,
+    client: OpenAI | None = None,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> list[DocumentExtraction]:
+    """Extract one transfer record per document, running the calls concurrently."""
+
+    if not documents:
+        raise ExtractionError("Upload at least one image or workbook.")
+    if len(documents) > MAX_DOCUMENTS:
+        raise ExtractionError(f"Upload no more than {MAX_DOCUMENTS} files at once.")
+
+    openai_client = client or _create_client(settings)
+    total = len(documents)
+    results: list[DocumentExtraction | None] = [None] * total
+
+    with ThreadPoolExecutor(max_workers=min(MAX_PARALLEL_EXTRACTIONS, total)) as pool:
+        futures = {
+            pool.submit(_extract_one, document, settings, openai_client): index
+            for index, document in enumerate(documents)
+        }
+        for completed, future in enumerate(as_completed(futures), start=1):
+            results[futures[future]] = future.result()
+            if on_progress is not None:
+                on_progress(completed, total)
+
+    return [result for result in results if result is not None]
+
+
+def _extract_one(
+    document: SourceDocument,
+    settings: Settings,
+    client: OpenAI,
+) -> DocumentExtraction:
+    try:
+        data = extract_transfer_data([document], settings, client=client)
+    except (ExtractionError, InvalidDocumentError, WorkbookReadError) as error:
+        return DocumentExtraction(document=document, error=str(error))
+    return DocumentExtraction(document=document, data=data)
 
 
 def extract_transfer_data(

@@ -72,6 +72,12 @@ def _read_modern_workbook(content: bytes) -> str:
 
 
 def _read_legacy_workbook(content: bytes) -> str:
+    """Read a legacy .xls workbook and render its cells as a positoin-aware text.
+    :param content: Raw bytes of the legacy .xls workbook.
+    : returns: Newline-separated text where each non-empty cell within the configured
+        row and column limits is represented by its Excel row and column.
+        Adds truncation markers when applicable.
+    """
     workbook = xlrd.open_workbook(file_contents=content, on_demand=True)
     lines: list[str] = []
 

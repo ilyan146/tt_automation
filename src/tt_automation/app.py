@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
@@ -13,20 +14,20 @@ from tt_automation.excel.generator import (
 )
 from tt_automation.excel.template_writer import TemplateWriteError
 from tt_automation.extraction.documents import (
-    InvalidDocumentError,
     SourceDocument,
     SUPPORTED_UPLOAD_TYPES,
 )
 from tt_automation.extraction.openai_extractor import (
+    DocumentExtraction,
     ExtractionError,
-    extract_transfer_data,
+    extract_each_document,
 )
 from tt_automation.extraction.workbook_reader import WorkbookReadError, workbook_to_text
 from tt_automation.models import ApplicantDetails, TransferData
 
 
-DATA_KEY = "extracted_transfer_data"
-OUTPUT_KEY = "generated_workbook"
+EXTRACTIONS_KEY = "document_extractions"
+OUTPUTS_KEY = "generated_workbooks"
 APPLICANT_KEY = "applicant_details"
 SOURCE_SIGNATURE_KEY = "source_signature"
 REVIEW_REVISION_KEY = "review_revision"
@@ -74,7 +75,7 @@ def main() -> None:
         type=SUPPORTED_UPLOAD_TYPES,
         accept_multiple_files=True,
         max_upload_size=20,
-        help="Accepted formats: JPG, PNG, WEBP, XLS, XLSX, and XLSM.",
+        help="Each file is extracted separately into its own workbook.",
     )
     documents = [
         SourceDocument(upload.name, upload.getvalue()) for upload in uploaded_files
@@ -99,21 +100,40 @@ def main() -> None:
     if settings.openai_api_key is None:
         st.warning("Add `OPENAI_API_KEY` to `.env` before extracting documents.")
 
-    extracted_data = st.session_state.get(DATA_KEY)
-    if not isinstance(extracted_data, TransferData):
+    extractions = st.session_state.get(EXTRACTIONS_KEY)
+    if not extractions:
         return
 
     st.divider()
     st.markdown(
         '<p class="step-label">02 &nbsp; REVIEW DETAILS</p>', unsafe_allow_html=True
     )
+    st.caption("Every source file has its own tab, review, and workbook.")
+    tabs = st.tabs([_tab_label(index, item) for index, item in enumerate(extractions)])
+    for index, (tab, extraction) in enumerate(zip(tabs, extractions)):
+        with tab:
+            _render_extraction(index, extraction)
+
+
+def _tab_label(index: int, extraction: DocumentExtraction) -> str:
+    name = extraction.document.name
+    if len(name) > 28:
+        name = f"{name[:25]}..."
+    return f"{index + 1}. {name}{' (failed)' if extraction.error else ''}"
+
+
+def _render_extraction(index: int, extraction: DocumentExtraction) -> None:
+    if extraction.data is None:
+        st.error(extraction.error or "This file could not be extracted.")
+        return
+
     source_column, review_column = st.columns([1.1, 2], gap="large")
     with source_column:
-        _render_source_preview(documents)
+        _render_source_preview([extraction.document])
     with review_column:
-        _render_review_notes(extracted_data)
-        _render_review_form(extracted_data)
-    _render_download()
+        _render_review_notes(extraction.data)
+        _render_review_form(index, extraction)
+    _render_download(index)
 
 
 def _render_system_status(settings: Settings) -> None:
@@ -140,7 +160,7 @@ def _render_system_status(settings: Settings) -> None:
 
 
 def _has_extracted_data() -> bool:
-    return isinstance(st.session_state.get(DATA_KEY), TransferData)
+    return bool(st.session_state.get(EXTRACTIONS_KEY))
 
 
 def _render_source_summary(documents: list[SourceDocument]) -> None:
@@ -193,19 +213,40 @@ def _render_source_preview(documents: list[SourceDocument]) -> None:
 
 
 def _extract(documents: list[SourceDocument], settings: Settings) -> None:
+    progress = st.progress(0.0, text=f"Extracting 0 of {len(documents)} files...")
+
+    def report(completed: int, total: int) -> None:
+        progress.progress(
+            completed / total,
+            text=f"Extracted {completed} of {total} files...",
+        )
+
     try:
-        with st.spinner("Extracting source documents...", show_time=True):
-            extracted_data = extract_transfer_data(documents, settings)
-    except (ExtractionError, InvalidDocumentError, WorkbookReadError) as error:
+        with st.spinner(f"Extracting {len(documents)} file(s)...", show_time=True):
+            extractions = extract_each_document(documents, settings, on_progress=report)
+    except ExtractionError as error:
         st.error(str(error))
         return
+    finally:
+        progress.empty()
 
-    st.session_state[DATA_KEY] = extracted_data
-    st.session_state.pop(OUTPUT_KEY, None)
+    st.session_state[EXTRACTIONS_KEY] = extractions
+    st.session_state[OUTPUTS_KEY] = {}
     st.session_state[REVIEW_REVISION_KEY] = (
         st.session_state.get(REVIEW_REVISION_KEY, 0) + 1
     )
-    st.success("Details extracted. Review every field before generating the workbook.")
+
+    failed = sum(1 for extraction in extractions if extraction.error)
+    if failed:
+        st.warning(
+            f"{len(extractions) - failed} of {len(extractions)} files extracted. "
+            "Open the tabs marked as failed for details."
+        )
+    else:
+        st.success(
+            f"{len(extractions)} file(s) extracted. "
+            "Review each tab before generating its workbook."
+        )
 
 
 def _render_review_notes(data: TransferData) -> None:
@@ -215,7 +256,11 @@ def _render_review_notes(data: TransferData) -> None:
                 st.markdown(f"- {note}")
 
 
-def _render_review_form(data: TransferData) -> None:
+def _render_review_form(index: int, extraction: DocumentExtraction) -> None:
+    data = extraction.data
+    if data is None:
+        return
+
     revision = st.session_state.get(REVIEW_REVISION_KEY, 0)
     stored_applicant = st.session_state.get(APPLICANT_KEY)
     applicant = (
@@ -225,9 +270,9 @@ def _render_review_form(data: TransferData) -> None:
     )
 
     def key(field: str) -> str:
-        return f"review_{revision}_{field}"
+        return f"review_{revision}_{index}_{field}"
 
-    with st.form("transfer_review"):
+    with st.form(f"transfer_review_{index}"):
         transfer_column, invoice_column = st.columns(2, gap="medium")
         with transfer_column:
             st.markdown("#### Transfer")
@@ -445,13 +490,13 @@ def _render_review_form(data: TransferData) -> None:
         st.error(str(error))
         return
 
-    st.session_state[DATA_KEY] = reviewed_data
-    st.session_state[OUTPUT_KEY] = generated
+    st.session_state[EXTRACTIONS_KEY][index] = replace(extraction, data=reviewed_data)
+    st.session_state.setdefault(OUTPUTS_KEY, {})[index] = generated
     st.success("Workbook ready.")
 
 
-def _render_download() -> None:
-    generated = st.session_state.get(OUTPUT_KEY)
+def _render_download(index: int) -> None:
+    generated = st.session_state.get(OUTPUTS_KEY, {}).get(index)
     if not isinstance(generated, GeneratedWorkbook):
         return
 
@@ -466,6 +511,7 @@ def _render_download() -> None:
         icon=":material/download:",
         on_click="ignore",
         width="stretch",
+        key=f"download_{index}",
     )
 
 
@@ -475,8 +521,8 @@ def _sync_source_state(documents: list[SourceDocument]) -> None:
         return
 
     st.session_state[SOURCE_SIGNATURE_KEY] = signature
-    st.session_state.pop(DATA_KEY, None)
-    st.session_state.pop(OUTPUT_KEY, None)
+    st.session_state.pop(EXTRACTIONS_KEY, None)
+    st.session_state.pop(OUTPUTS_KEY, None)
 
 
 def _source_signature(documents: list[SourceDocument]) -> str:
