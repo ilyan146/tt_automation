@@ -7,7 +7,11 @@ from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 import xlrd
 
-from tt_automation.extraction.documents import SourceDocument
+from tt_automation.extraction.documents import (
+    SUFFIX_KINDS,
+    DocumentKind,
+    SourceDocument,
+)
 
 
 MAX_SHEETS = 10
@@ -23,7 +27,7 @@ class WorkbookReadError(ValueError):
 def workbook_to_text(document: SourceDocument) -> str:
     """Render non-empty workbook cells as compact, position-aware text."""
 
-    if not document.is_workbook:
+    if SUFFIX_KINDS.get(document.suffix) is not DocumentKind.WORKBOOK:
         raise WorkbookReadError(f"{document.name} is not a supported workbook.")
 
     try:

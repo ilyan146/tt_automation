@@ -14,12 +14,14 @@ from tt_automation.excel.generator import (
 )
 from tt_automation.excel.template_writer import TemplateWriteError
 from tt_automation.extraction.documents import (
+    DocumentKind,
     SourceDocument,
     SUPPORTED_UPLOAD_TYPES,
 )
 from tt_automation.extraction.openai_extractor import (
     DocumentExtraction,
     ExtractionError,
+    MAX_DOCUMENTS,
     extract_each_document,
 )
 from tt_automation.extraction.workbook_reader import WorkbookReadError, workbook_to_text
@@ -31,6 +33,8 @@ OUTPUTS_KEY = "generated_workbooks"
 APPLICANT_KEY = "applicant_details"
 SOURCE_SIGNATURE_KEY = "source_signature"
 REVIEW_REVISION_KEY = "review_revision"
+
+FILE_BADGES = {DocumentKind.PDF: "PDF", DocumentKind.WORKBOOK: "XLS"}
 
 REQUIRED_FIELDS = {
     "beneficiary_name": "Beneficiary name",
@@ -70,23 +74,35 @@ def main() -> None:
     st.markdown(
         '<p class="step-label">01 &nbsp; SOURCE DOCUMENTS</p>', unsafe_allow_html=True
     )
+    st.caption(
+        f"Up to {MAX_DOCUMENTS} files per run, 20 MB each. "
+        "Every file becomes its own review tab and workbook."
+    )
     uploaded_files = st.file_uploader(
-        "Invoice images or Excel files",
+        "Invoice images, PDFs, or Excel files",
         type=SUPPORTED_UPLOAD_TYPES,
         accept_multiple_files=True,
         max_upload_size=20,
-        help="Each file is extracted separately into its own workbook.",
+        help=f"Select no more than {MAX_DOCUMENTS} files at a time.",
     )
     documents = [
         SourceDocument(upload.name, upload.getvalue()) for upload in uploaded_files
     ]
     _sync_source_state(documents)
+    excess_count = len(documents) - MAX_DOCUMENTS
+    if excess_count > 0:
+        st.error(
+            f"{len(documents)} files selected. "
+            f"Remove {excess_count} to stay within the {MAX_DOCUMENTS} file limit."
+        )
     summary_slot = st.empty()
     if not _has_extracted_data():
         with summary_slot.container():
             _render_source_summary(documents)
 
-    can_extract = bool(documents) and settings.openai_api_key is not None
+    can_extract = (
+        bool(documents) and excess_count <= 0 and settings.openai_api_key is not None
+    )
     if st.button(
         "Extract details",
         type="primary",
@@ -167,8 +183,12 @@ def _render_source_summary(documents: list[SourceDocument]) -> None:
     if not documents:
         return
 
-    image_documents = [document for document in documents if document.is_image]
-    workbook_documents = [document for document in documents if document.is_workbook]
+    image_documents = [
+        document for document in documents if document.kind is DocumentKind.IMAGE
+    ]
+    listed_documents = [
+        document for document in documents if document.kind is not DocumentKind.IMAGE
+    ]
 
     st.caption(
         f"{len(documents)} source file{'s' if len(documents) != 1 else ''} selected"
@@ -184,10 +204,11 @@ def _render_source_summary(documents: list[SourceDocument]) -> None:
         if len(image_documents) > 3:
             st.caption(f"{len(image_documents) - 3} additional images selected")
 
-    for document in workbook_documents:
+    for document in listed_documents:
         size = _format_file_size(len(document.content))
+        badge = FILE_BADGES.get(document.kind, "DOC")
         st.markdown(
-            f'<div class="file-row"><span class="file-icon">XLS</span>'
+            f'<div class="file-row"><span class="file-icon">{badge}</span>'
             f"<span><strong>{_escape_html(document.name)}</strong><br>"
             f"<small>{size}</small></span></div>",
             unsafe_allow_html=True,
@@ -203,13 +224,20 @@ def _render_source_preview(documents: list[SourceDocument]) -> None:
     with st.container(height=900, border=False):
         for index, document in enumerate(documents):
             with st.expander(document.name, expanded=index == 0):
-                if document.is_image:
-                    st.image(document.content, width="stretch")
-                    continue
-                try:
-                    st.code(workbook_to_text(document), language="text")
-                except WorkbookReadError as error:
-                    st.caption(str(error))
+                _render_document_body(document)
+
+
+def _render_document_body(document: SourceDocument) -> None:
+    match document.kind:
+        case DocumentKind.IMAGE:
+            st.image(document.content, width="stretch")
+        case DocumentKind.PDF:
+            st.pdf(document.content, height=820)
+        case DocumentKind.WORKBOOK:
+            try:
+                st.code(workbook_to_text(document), language="text")
+            except WorkbookReadError as error:
+                st.caption(str(error))
 
 
 def _extract(documents: list[SourceDocument], settings: Settings) -> None:
