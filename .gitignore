@@ -13,4 +13,4 @@ wheels/
 .env
 .pytest_cache/
 .streamlit/secrets.toml
-
+*.ipynb

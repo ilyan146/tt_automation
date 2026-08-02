@@ -1,8 +1,17 @@
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, WithJsonSchema, field_validator
+
+MoneyAmount = Annotated[Decimal, WithJsonSchema({"type": "number"})]
+"""Decimal that is advertised to the model as a plain JSON number.
+
+Pydantic's default ``Decimal`` schema is an ``anyOf`` whose string branch carries a
+regex with a negative lookahead. Constrained decoding cannot compile that pattern, so
+the provider returns a 500 ``model_error``. Overriding the wire schema keeps full
+``Decimal`` parsing and the ``ge`` constraint on the Python side.
+"""
 
 
 class TransferData(BaseModel):
@@ -22,7 +31,7 @@ class TransferData(BaseModel):
         default=None,
         description="Three-letter payment currency code, such as USD.",
     )
-    amount: Decimal | None = Field(
+    amount: MoneyAmount | None = Field(
         default=None,
         ge=0,
         description="Total invoice or transfer amount, excluding the currency code.",

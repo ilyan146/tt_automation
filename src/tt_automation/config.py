@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     openai_reasoning_effort: Literal["low", "medium", "high"] = "low"
     openai_timeout_seconds: float = 90.0
     openai_base_url: str
+    openai_max_retries: int = 2
 
     @field_validator("openai_api_key", mode="before")
     @classmethod
