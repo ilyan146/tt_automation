@@ -9,12 +9,16 @@ from openpyxl import Workbook
 import pytest
 
 from tt_automation.config import Settings
-from tt_automation.extraction.documents import SourceDocument
+from tt_automation.extraction.documents import InvalidDocumentError, SourceDocument
 from tt_automation.extraction.openai_extractor import (
     ExtractionError,
+    build_response_input,
     extract_transfer_data,
 )
 from tt_automation.models import TransferData
+
+
+MINIMAL_PDF = b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n"
 
 
 class FakeResponses:
@@ -93,3 +97,19 @@ def test_converts_invalid_structured_output_to_extraction_error() -> None:
             settings,
             client=cast(OpenAI, InvalidOpenAI()),
         )
+
+
+def test_sends_pdf_as_base64_file_input() -> None:
+    request_input = build_response_input([SourceDocument("invoice.pdf", MINIMAL_PDF)])
+
+    parts = request_input[0]["content"]
+    assert {"type": "input_text", "text": "PDF source: invoice.pdf"} in parts
+    file_part = parts[-1]
+    assert file_part["type"] == "input_file"
+    assert file_part["filename"] == "invoice.pdf"
+    assert file_part["file_data"].startswith("data:application/pdf;base64,")
+
+
+def test_rejects_pdf_upload_without_pdf_content() -> None:
+    with pytest.raises(InvalidDocumentError, match="not a readable pdf"):
+        build_response_input([SourceDocument("invoice.pdf", b"not really a pdf")])

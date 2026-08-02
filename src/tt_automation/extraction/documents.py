@@ -1,15 +1,41 @@
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 
 
-IMAGE_MEDIA_TYPES = {
+class DocumentKind(StrEnum):
+    """How a source document is presented to the model."""
+
+    IMAGE = "image"
+    PDF = "pdf"
+    WORKBOOK = "workbook"
+
+
+SUFFIX_KINDS: dict[str, DocumentKind] = {
+    ".jpeg": DocumentKind.IMAGE,
+    ".jpg": DocumentKind.IMAGE,
+    ".png": DocumentKind.IMAGE,
+    ".webp": DocumentKind.IMAGE,
+    ".pdf": DocumentKind.PDF,
+    ".xls": DocumentKind.WORKBOOK,
+    ".xlsm": DocumentKind.WORKBOOK,
+    ".xlsx": DocumentKind.WORKBOOK,
+}
+"""Every accepted suffix and the extraction strategy it maps to."""
+
+MEDIA_TYPES: dict[str, str] = {
     ".jpeg": "image/jpeg",
     ".jpg": "image/jpeg",
     ".png": "image/png",
     ".webp": "image/webp",
+    ".pdf": "application/pdf",
 }
-WORKBOOK_SUFFIXES = frozenset({".xls", ".xlsx", ".xlsm"})
-SUPPORTED_SUFFIXES = frozenset(IMAGE_MEDIA_TYPES) | WORKBOOK_SUFFIXES
+"""Media types for the suffixes sent to OpenAI as base64 data URLs."""
+
+MAGIC_PREFIXES: dict[str, bytes] = {".pdf": b"%PDF-"}
+"""Leading bytes a suffix must carry before its content is worth uploading."""
+
+SUPPORTED_SUFFIXES = frozenset(SUFFIX_KINDS)
 SUPPORTED_UPLOAD_TYPES = tuple(
     suffix.removeprefix(".") for suffix in sorted(SUPPORTED_SUFFIXES)
 )
@@ -30,20 +56,19 @@ class SourceDocument:
         return Path(self.name).suffix.lower()
 
     @property
-    def is_image(self) -> bool:
-        return self.suffix in IMAGE_MEDIA_TYPES
-
-    @property
-    def is_workbook(self) -> bool:
-        return self.suffix in WORKBOOK_SUFFIXES
-
-    @property
-    def image_media_type(self) -> str:
+    def kind(self) -> DocumentKind:
         try:
-            return IMAGE_MEDIA_TYPES[self.suffix]
+            return SUFFIX_KINDS[self.suffix]
+        except KeyError as error:
+            raise InvalidDocumentError(f"Unsupported file type: {self.name}") from error
+
+    @property
+    def media_type(self) -> str:
+        try:
+            return MEDIA_TYPES[self.suffix]
         except KeyError as error:
             raise InvalidDocumentError(
-                f"{self.name} is not a supported image."
+                f"{self.name} cannot be sent as a data URL."
             ) from error
 
     def validate(self) -> None:
@@ -55,3 +80,6 @@ class SourceDocument:
             raise InvalidDocumentError(
                 f"{self.name} exceeds the {MAX_DOCUMENT_BYTES // (1024 * 1024)} MB limit."
             )
+        expected_prefix = MAGIC_PREFIXES.get(self.suffix)
+        if expected_prefix and not self.content.startswith(expected_prefix):
+            raise InvalidDocumentError(f"{self.name} is not a readable {self.kind}.")

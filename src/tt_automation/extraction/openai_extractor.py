@@ -1,5 +1,5 @@
 from base64 import b64encode
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 
@@ -8,12 +8,16 @@ from openai.types.responses import ResponseInputContentParam, ResponseInputParam
 from pydantic import ValidationError
 
 from tt_automation.config import Settings
-from tt_automation.extraction.documents import InvalidDocumentError, SourceDocument
+from tt_automation.extraction.documents import (
+    DocumentKind,
+    InvalidDocumentError,
+    SourceDocument,
+)
 from tt_automation.extraction.workbook_reader import WorkbookReadError, workbook_to_text
 from tt_automation.models import TransferData
 
 
-MAX_DOCUMENTS = 10
+MAX_DOCUMENTS = 15
 MAX_PARALLEL_EXTRACTIONS = 4
 
 SYSTEM_INSTRUCTIONS = """
@@ -39,6 +43,10 @@ Return dates in ISO YYYY-MM-DD format. For all-numeric dates such as 05/01/2024,
 interpret them as day/month/year and add a review note recording the assumption.
 Return null for transfer_date unless a document explicitly states the date the
 transfer application itself was prepared. Never copy the invoice date into it.
+
+A PDF may span several pages. Read every page and treat them as one document,
+because remittance and bank details, final totals, and signatures often appear on a
+later page than the invoice header.
 
 For amount, prefer an explicitly labelled final payable total, such as "Grand
 Total", "Invoice Total", "Total Amount Due", or "Amount Payable". Do not use a
@@ -91,7 +99,7 @@ def extract_each_document(
     """Extract one transfer record per document, running the calls concurrently."""
 
     if not documents:
-        raise ExtractionError("Upload at least one image or workbook.")
+        raise ExtractionError("Upload at least one image, PDF, or workbook.")
     if len(documents) > MAX_DOCUMENTS:
         raise ExtractionError(f"Upload no more than {MAX_DOCUMENTS} files at once.")
 
@@ -133,7 +141,7 @@ def extract_transfer_data(
     """Extract one validated transfer record from one or more source documents."""
 
     if not documents:
-        raise ExtractionError("Upload at least one image or workbook.")
+        raise ExtractionError("Upload at least one image, PDF, or workbook.")
 
     openai_client = client or _create_client(settings)
     try:
@@ -159,7 +167,7 @@ def extract_transfer_data(
 
 
 def build_response_input(documents: Sequence[SourceDocument]) -> ResponseInputParam:
-    """Build a mixed image/text request while retaining each source filename."""
+    """Build a mixed image/PDF/text request while retaining each source filename."""
 
     if len(documents) > MAX_DOCUMENTS:
         raise ExtractionError(f"Upload no more than {MAX_DOCUMENTS} files at once.")
@@ -173,18 +181,7 @@ def build_response_input(documents: Sequence[SourceDocument]) -> ResponseInputPa
 
     for document in documents:
         document.validate()
-        if document.is_image:
-            content.extend(_image_content(document))
-        elif document.is_workbook:
-            content.append(
-                {
-                    "type": "input_text",
-                    "text": (
-                        f"Workbook source: {document.name}\n"
-                        f"{workbook_to_text(document)}"
-                    ),
-                }
-            )
+        content.extend(CONTENT_BUILDERS[document.kind](document))
 
     return [{"role": "user", "content": content}]
 
@@ -201,12 +198,46 @@ def _create_client(settings: Settings) -> OpenAI:
 
 
 def _image_content(document: SourceDocument) -> list[ResponseInputContentParam]:
-    encoded_image = b64encode(document.content).decode("ascii")
     return [
         {"type": "input_text", "text": f"Image source: {document.name}"},
         {
             "type": "input_image",
             "detail": "high",
-            "image_url": f"data:{document.image_media_type};base64,{encoded_image}",
+            "image_url": _data_url(document),
         },
     ]
+
+
+def _pdf_content(document: SourceDocument) -> list[ResponseInputContentParam]:
+    return [
+        {"type": "input_text", "text": f"PDF source: {document.name}"},
+        {
+            "type": "input_file",
+            "filename": document.name,
+            "file_data": _data_url(document),
+        },
+    ]
+
+
+def _workbook_content(document: SourceDocument) -> list[ResponseInputContentParam]:
+    return [
+        {
+            "type": "input_text",
+            "text": f"Workbook source: {document.name}\n{workbook_to_text(document)}",
+        }
+    ]
+
+
+def _data_url(document: SourceDocument) -> str:
+    encoded = b64encode(document.content).decode("ascii")
+    return f"data:{document.media_type};base64,{encoded}"
+
+
+CONTENT_BUILDERS: Mapping[
+    DocumentKind, Callable[[SourceDocument], list[ResponseInputContentParam]]
+] = {
+    DocumentKind.IMAGE: _image_content,
+    DocumentKind.PDF: _pdf_content,
+    DocumentKind.WORKBOOK: _workbook_content,
+}
+"""Request parts each document kind contributes; extend alongside DocumentKind."""
