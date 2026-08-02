@@ -132,4 +132,4 @@ def _render_row(row_number: int, values: tuple[Any, ...] | list[Any]) -> str:
 def _render_value(value: Any) -> str:
     if isinstance(value, (date, datetime)):
         value = value.isoformat()
-    return json.dumps(value, ensure_ascii=True, default=str)
+    return json.dumps(value, ensure_ascii=False, default=str)

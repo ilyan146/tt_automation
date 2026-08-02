@@ -127,7 +127,7 @@ def _render_extraction(index: int, extraction: DocumentExtraction) -> None:
         st.error(extraction.error or "This file could not be extracted.")
         return
 
-    source_column, review_column = st.columns([1.1, 2], gap="large")
+    source_column, review_column = st.columns([1.6, 2], gap="large")
     with source_column:
         _render_source_preview([extraction.document])
     with review_column:
@@ -593,7 +593,7 @@ def _apply_styles() -> None:
                 linear-gradient(90deg, rgba(23, 37, 42, 0.025) 1px, transparent 1px);
             background-size: 24px 24px;
         }
-        .block-container { max-width: 1600px; padding-top: 3rem; padding-bottom: 5rem; }
+        .block-container { max-width: 2100px; padding-top: 3rem; padding-bottom: 5rem; }
         h1, h2, h3, h4 { font-family: Georgia, "Times New Roman", serif; color: var(--ink); letter-spacing: 0; }
         h1 { font-size: 2.5rem; line-height: 1.05; margin-bottom: 0.4rem; }
         p, label, input, textarea, button { font-family: Aptos, "Segoe UI", sans-serif; letter-spacing: 0; }
